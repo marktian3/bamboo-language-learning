@@ -114,9 +114,8 @@ export async function buildDictionaryFallbackGloss(
     word,
     pinyin: wordPinyin,
     gloss,
-    inContext: extraDefs ? `Other dictionary senses: ${extraDefs}` : 'From CC-CEDICT offline dictionary',
+    inContext: extraDefs,
     breakdown,
-    note: 'Offline dictionary fallback (add a DeepSeek API key in Settings for contextual AI analysis)',
     isDictionaryFallback: true,
   };
 }

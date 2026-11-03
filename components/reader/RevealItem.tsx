@@ -156,10 +156,12 @@ export function RevealItem({
           {glossItem?.gloss || 'Loading definition...'}
         </div>
 
-        {/* In Context Explanation */}
+        {/* In Context Explanation / Additional Senses */}
         {glossItem?.inContext && (
           <div className="text-xs text-[var(--ink)] leading-relaxed bg-[var(--bg)] p-2.5 rounded-lg border border-[var(--border)]">
-            <span className="font-semibold text-[var(--ink-muted)]">Here: </span>
+            <span className="font-semibold text-[var(--ink-muted)]">
+              {glossItem.isDictionaryFallback ? 'Also: ' : 'Here: '}
+            </span>
             {glossItem.inContext}
           </div>
         )}
