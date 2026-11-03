@@ -82,6 +82,7 @@ export const TokenSpan = React.forwardRef<HTMLSpanElement, TokenSpanProps>(
         lang="zh-CN"
         onClick={onClick}
         onKeyDown={onKeyDown}
+        style={{ textIndent: 0 }}
         className={cn(
           'relative inline-block cursor-pointer select-text transition-colors duration-150 rounded px-0.5 mx-[0.5px] -my-1 py-1 focus:outline-none',
           // Hover state

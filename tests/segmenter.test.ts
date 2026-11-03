@@ -102,8 +102,8 @@ describe('IntlChineseSegmenter', () => {
   });
 
   it('repairs non-dictionary multi-character chunks using valid dictionary words', () => {
-    const text = '我与父亲不相见已二年余了';
-    const validWords = new Set(['父亲', '相见']);
+    const text = '我与父亲不相见已二年余了，我最不能忘记的是他的背影。';
+    const validWords = new Set(['父亲', '相见', '不能', '忘记', '背影']);
     const tokens = segmenter.segment(text, [], validWords);
     const tokenTexts = tokens.map(t => t.text);
 
@@ -115,5 +115,18 @@ describe('IntlChineseSegmenter', () => {
     expect(tokenTexts).not.toContain('二年');
     expect(tokenTexts).toContain('二');
     expect(tokenTexts).toContain('年');
+
+    // Words immediately preceding punctuation ("了" before "，" and "背影" before "。") must be clickable words (isWord=true)
+    const leToken = tokens.find(t => t.text === '了');
+    expect(leToken?.isWord).toBe(true);
+
+    const beiyingToken = tokens.find(t => t.text === '背影');
+    expect(beiyingToken?.isWord).toBe(true);
+
+    const commaToken = tokens.find(t => t.text === '，');
+    expect(commaToken?.isWord).toBe(false);
+
+    const periodToken = tokens.find(t => t.text === '。');
+    expect(periodToken?.isWord).toBe(false);
   });
 });

@@ -459,8 +459,9 @@ export default function ReaderPage() {
               key={pIdx}
               role="paragraph"
               className="mb-6 text-justify select-text relative"
-              style={{ textIndent: '2em', letterSpacing: '0.04em' }}
+              style={{ letterSpacing: '0.04em' }}
             >
+              <span className="inline-block w-[2em] select-none" aria-hidden="true" />
               {tokensInPara.map(token => {
                 const mark = marksByStart.get(token.start);
                 const isToolbarOpen = activeToolbarTokenId === token.id;

@@ -3,6 +3,7 @@ import { splitSentences } from './sentences';
 import { filterValidDictionaryWords } from '@/lib/dict/cedict';
 
 const CJK_REGEX = /[\u4e00-\u9fa5\u3400-\u4dbf\uf900-\ufaff]/;
+const CJK_RUN_SPLIT_REGEX = /([\u4e00-\u9fa5\u3400-\u4dbf\uf900-\ufaff]+|[^\u4e00-\u9fa5\u3400-\u4dbf\uf900-\ufaff]+)/g;
 
 export interface Segmenter {
   segment(
@@ -42,26 +43,33 @@ export class IntlChineseSegmenter implements Segmenter {
       };
     };
 
-    // Base segmentation using Intl.Segmenter
+    // Base segmentation using Intl.Segmenter, splitting any mixed CJK/punctuation segments
     const rawTokens: Token[] = [];
     const segments = this.segmenter.segment(text);
 
     for (const seg of segments) {
       const segText = seg.segment;
-      const start = seg.index;
-      const end = start + segText.length;
-      const isWord = Boolean(seg.isWordLike && CJK_REGEX.test(segText));
-      const loc = findLocation(start);
+      const segStart = seg.index;
 
-      rawTokens.push({
-        id: `t_${start}_${end}`,
-        text: segText,
-        start,
-        end,
-        isWord,
-        sentenceIdx: loc.sentenceIdx,
-        paragraphIdx: loc.paragraphIdx,
-      });
+      let match: RegExpExecArray | null;
+      CJK_RUN_SPLIT_REGEX.lastIndex = 0;
+      while ((match = CJK_RUN_SPLIT_REGEX.exec(segText)) !== null) {
+        const partText = match[0];
+        const start = segStart + match.index;
+        const end = start + partText.length;
+        const isWord = CJK_REGEX.test(partText);
+        const loc = findLocation(start);
+
+        rawTokens.push({
+          id: `t_${start}_${end}`,
+          text: partText,
+          start,
+          end,
+          isWord,
+          sentenceIdx: loc.sentenceIdx,
+          paragraphIdx: loc.paragraphIdx,
+        });
+      }
     }
 
     // Refine tokens against dictionary if validWords set is provided
