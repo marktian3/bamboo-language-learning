@@ -23,13 +23,19 @@ describe('CC-CEDICT Offline Dictionary', () => {
     expect(dict['好']).toBeDefined();
     expect(dict['落实']).toBeDefined();
     expect(dict['效率']).toBeDefined();
+
+    // Metadata senses like CL: and "also pr." should be stripped from definitions
+    expect(dict['父亲']).toBeDefined();
+    expect(dict['父亲'].definitions).toContain('father');
+    expect(dict['父亲'].definitions.some((d: string) => d.startsWith('CL:'))).toBe(false);
+    expect(dict['父亲'].definitions.some((d: string) => d.includes('also pr.'))).toBe(false);
   });
 
   it('buildDictionaryFallbackGloss correctly resolves definition and breakdown', async () => {
     const gloss = await buildDictionaryFallbackGloss('落实');
     expect(gloss.word).toBe('落实');
     expect(gloss.pinyin).toBe('luò shí');
-    expect(gloss.gloss).toBe('practical');
+    expect(gloss.gloss).toBe('to implement');
     expect(gloss.isDictionaryFallback).toBe(true);
     expect(gloss.breakdown).toHaveLength(2);
     expect(gloss.breakdown[0].char).toBe('落');

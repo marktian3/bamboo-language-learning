@@ -1,7 +1,7 @@
 import { db, type DictEntry, type GlossItem } from '@/lib/db';
 import { getWordPinyin } from './pinyin';
 
-const DICT_VERSION = '1';
+const DICT_VERSION = '2';
 const DICT_VERSION_KEY = '__version__';
 
 let memoryDictFallback: Map<string, DictEntry> | null = null;

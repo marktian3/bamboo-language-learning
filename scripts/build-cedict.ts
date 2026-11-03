@@ -69,6 +69,13 @@ const ESSENTIAL_DICT: Record<string, { pinyin: string; definitions: string[] }> 
   '惨淡': { pinyin: 'cǎn dàn', definitions: ['dark', 'gloomy', 'dismal'] },
 };
 
+function isMetadataSense(sense: string): boolean {
+  const s = sense.trim();
+  if (/^CL:/i.test(s)) return true;
+  if (/^(?:also\s+|Taiwan\s+|mainland\s+)?pr\.\s*\[/i.test(s)) return true;
+  return false;
+}
+
 function parseCedictLine(line: string) {
   const trimmed = line.trim();
   if (!trimmed || trimmed.startsWith('#')) return null;
@@ -77,7 +84,9 @@ function parseCedictLine(line: string) {
   const match = trimmed.match(/^(\S+)\s+(\S+)\s+\[(.*?)\]\s+\/(.*)\/$/);
   if (!match) return null;
   const [, traditional, simplified, pinyin, defs] = match;
-  const definitions = defs.split('/').filter(d => d.trim().length > 0);
+  const rawDefs = defs.split('/').map(d => d.trim()).filter(d => d.length > 0);
+  const filteredDefs = rawDefs.filter(d => !isMetadataSense(d));
+  const definitions = filteredDefs.length > 0 ? filteredDefs : rawDefs;
   return { traditional, simplified, pinyin, definitions };
 }
 
@@ -103,10 +112,26 @@ async function buildDict() {
     for (const rawLine of lines) {
       const parsed = parseCedictLine(rawLine);
       if (parsed) {
-        dict[parsed.simplified] = {
-          pinyin: parsed.pinyin,
-          definitions: parsed.definitions,
-        };
+        const existing = dict[parsed.simplified];
+        if (!existing) {
+          dict[parsed.simplified] = {
+            pinyin: parsed.pinyin,
+            definitions: parsed.definitions,
+          };
+        } else {
+          // Prefer lowercase (common word) over capitalized (surname/proper noun) as primary sense
+          const existingIsProper = /^[A-Z]/.test(existing.pinyin) || /^surname\b/i.test(existing.definitions[0] || '');
+          const newIsProper = /^[A-Z]/.test(parsed.pinyin) || /^surname\b/i.test(parsed.definitions[0] || '');
+
+          const primaryDefs = existingIsProper && !newIsProper ? parsed.definitions : existing.definitions;
+          const secondaryDefs = existingIsProper && !newIsProper ? existing.definitions : parsed.definitions;
+          const mergedDefs = Array.from(new Set([...primaryDefs, ...secondaryDefs]));
+
+          dict[parsed.simplified] = {
+            pinyin: existingIsProper && !newIsProper ? parsed.pinyin : existing.pinyin,
+            definitions: mergedDefs,
+          };
+        }
         count++;
       }
     }
