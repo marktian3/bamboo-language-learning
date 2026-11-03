@@ -10,7 +10,7 @@ import { RevealPanel } from '@/components/reader/RevealPanel';
 import { SentenceTranslation } from '@/components/reader/SentenceTranslation';
 import { FinishModal } from '@/components/reader/FinishModal';
 import { fetchGlossesForMarks } from '@/lib/llm/client';
-import { segmentText } from '@/lib/segment/segmenter';
+import { segmentTextWithDictionary } from '@/lib/segment/segmenter';
 import { getWordPinyin } from '@/lib/dict/pinyin';
 import { createNewCard } from '@/lib/srs/fsrs';
 import { speakChinese, stopSpeaking } from '@/lib/tts/speak';
@@ -52,13 +52,32 @@ export default function ReaderPage() {
         return;
       }
 
-      // Update lastOpenedAt
-      await db.passages.update(passageId, { lastOpenedAt: Date.now() });
-      p.lastOpenedAt = Date.now();
+      // Re-segment with dictionary validation so non-dictionary chunks are resolved
+      const validatedTokens = await segmentTextWithDictionary(p.text, p.merges);
+      const now = Date.now();
+      await db.passages.update(passageId, { tokens: validatedTokens, lastOpenedAt: now });
+      p.tokens = validatedTokens;
+      p.lastOpenedAt = now;
       setPassage(p);
 
-      const m = await db.marks.where('passageId').equals(passageId).toArray();
-      setMarks(m);
+      const rawMarks = await db.marks.where('passageId').equals(passageId).toArray();
+      const tokenByStart = new Map(validatedTokens.map(t => [t.start, t]));
+      const syncedMarks: Mark[] = [];
+      for (const mark of rawMarks) {
+        const matchingToken = tokenByStart.get(mark.start);
+        if (matchingToken && (matchingToken.end !== mark.end || matchingToken.text !== mark.surface)) {
+          const updatedMark: Mark = {
+            ...mark,
+            end: matchingToken.end,
+            surface: matchingToken.text,
+          };
+          await db.marks.update(mark.id, { end: matchingToken.end, surface: matchingToken.text });
+          syncedMarks.push(updatedMark);
+        } else {
+          syncedMarks.push(mark);
+        }
+      }
+      setMarks(syncedMarks);
 
       const s = await getSettings();
       setSettings(s);
@@ -195,7 +214,7 @@ export default function ReaderPage() {
 
     const newSurface = passage.text.slice(newStart, newEnd);
     const newMerges = [...passage.merges, { start: newStart, end: newEnd }];
-    const resegmented = segmentText(passage.text, newMerges);
+    const resegmented = await segmentTextWithDictionary(passage.text, newMerges);
 
     await db.transaction('rw', [db.passages, db.marks], async () => {
       await db.passages.update(passage.id, {
@@ -223,7 +242,7 @@ export default function ReaderPage() {
     const remainingMerges = passage.merges.filter(
       m => !(m.start >= mark.start && m.end <= mark.end)
     );
-    const resegmented = segmentText(passage.text, remainingMerges);
+    const resegmented = await segmentTextWithDictionary(passage.text, remainingMerges);
 
     await db.transaction('rw', [db.passages, db.marks], async () => {
       await db.passages.update(passage.id, {
@@ -633,7 +652,7 @@ export default function ReaderPage() {
           if (sOffset !== -1) {
             const eOffset = sOffset + suggested.length;
             const newMerges = [...passage.merges, { start: sOffset, end: eOffset }];
-            const resegmented = segmentText(passage.text, newMerges);
+            const resegmented = await segmentTextWithDictionary(passage.text, newMerges);
             await db.passages.update(passage.id, { tokens: resegmented, merges: newMerges });
             await db.marks.update(markId, { start: sOffset, end: eOffset, surface: suggested });
             setPassage({ ...passage, tokens: resegmented, merges: newMerges });

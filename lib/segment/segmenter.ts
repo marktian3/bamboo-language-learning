@@ -1,10 +1,15 @@
 import { type Token } from '@/lib/db';
 import { splitSentences } from './sentences';
+import { filterValidDictionaryWords } from '@/lib/dict/cedict';
 
 const CJK_REGEX = /[\u4e00-\u9fa5\u3400-\u4dbf\uf900-\ufaff]/;
 
 export interface Segmenter {
-  segment(text: string, merges?: { start: number; end: number }[]): Token[];
+  segment(
+    text: string,
+    merges?: { start: number; end: number }[],
+    validWords?: ReadonlySet<string>
+  ): Token[];
 }
 
 export class IntlChineseSegmenter implements Segmenter {
@@ -14,7 +19,11 @@ export class IntlChineseSegmenter implements Segmenter {
     this.segmenter = new Intl.Segmenter('zh-CN', { granularity: 'word' });
   }
 
-  segment(text: string, merges: { start: number; end: number }[] = []): Token[] {
+  segment(
+    text: string,
+    merges: { start: number; end: number }[] = [],
+    validWords?: ReadonlySet<string>
+  ): Token[] {
     if (!text) return [];
 
     const sentences = splitSentences(text);
@@ -34,7 +43,7 @@ export class IntlChineseSegmenter implements Segmenter {
     };
 
     // Base segmentation using Intl.Segmenter
-    const baseTokens: Token[] = [];
+    const rawTokens: Token[] = [];
     const segments = this.segmenter.segment(text);
 
     for (const seg of segments) {
@@ -44,7 +53,7 @@ export class IntlChineseSegmenter implements Segmenter {
       const isWord = Boolean(seg.isWordLike && CJK_REGEX.test(segText));
       const loc = findLocation(start);
 
-      baseTokens.push({
+      rawTokens.push({
         id: `t_${start}_${end}`,
         text: segText,
         start,
@@ -54,6 +63,11 @@ export class IntlChineseSegmenter implements Segmenter {
         paragraphIdx: loc.paragraphIdx,
       });
     }
+
+    // Refine tokens against dictionary if validWords set is provided
+    const baseTokens: Token[] = validWords
+      ? this.refineWithDictionary(text, rawTokens, validWords, findLocation)
+      : rawTokens;
 
     if (!merges || merges.length === 0) {
       return baseTokens;
@@ -107,10 +121,139 @@ export class IntlChineseSegmenter implements Segmenter {
 
     return resultTokens;
   }
+
+  /**
+   * Repairs multi-character tokens from Intl.Segmenter that do not exist in CC-CEDICT
+   * by re-segmenting the invalid token and its adjacent 1-character CJK neighbors
+   * using forward maximum matching against valid dictionary words.
+   */
+  private refineWithDictionary(
+    text: string,
+    tokens: Token[],
+    validWords: ReadonlySet<string>,
+    findLocation: (offset: number) => { sentenceIdx: number; paragraphIdx: number }
+  ): Token[] {
+    const isInvalidMultiChar = (t: Token) =>
+      t.isWord && t.text.length > 1 && !validWords.has(t.text);
+
+    // Mark which token indices need repair (invalid multi-char tokens + adjacent 1-char CJK tokens in same sentence)
+    const repairMask = new Array<boolean>(tokens.length).fill(false);
+    for (let i = 0; i < tokens.length; i++) {
+      if (isInvalidMultiChar(tokens[i])) {
+        repairMask[i] = true;
+        if (
+          i > 0 &&
+          tokens[i - 1].isWord &&
+          tokens[i - 1].text.length === 1 &&
+          tokens[i - 1].sentenceIdx === tokens[i].sentenceIdx
+        ) {
+          repairMask[i - 1] = true;
+        }
+        if (
+          i + 1 < tokens.length &&
+          tokens[i + 1].isWord &&
+          tokens[i + 1].text.length === 1 &&
+          tokens[i + 1].sentenceIdx === tokens[i].sentenceIdx
+        ) {
+          repairMask[i + 1] = true;
+        }
+      }
+    }
+
+    const refined: Token[] = [];
+    let i = 0;
+    while (i < tokens.length) {
+      if (!repairMask[i]) {
+        refined.push(tokens[i]);
+        i++;
+        continue;
+      }
+
+      // Collect contiguous repair span within the same sentence
+      const spanStart = tokens[i].start;
+      const sentenceIdx = tokens[i].sentenceIdx;
+      let spanEnd = tokens[i].end;
+      i++;
+      while (
+        i < tokens.length &&
+        repairMask[i] &&
+        tokens[i].sentenceIdx === sentenceIdx &&
+        tokens[i].start === spanEnd
+      ) {
+        spanEnd = tokens[i].end;
+        i++;
+      }
+
+      // Forward maximum matching (4 -> 3 -> 2 -> 1 chars) over [spanStart, spanEnd)
+      let pos = spanStart;
+      while (pos < spanEnd) {
+        let matchedEnd = pos + 1;
+        for (const len of [4, 3, 2]) {
+          if (pos + len <= spanEnd) {
+            const candidate = text.slice(pos, pos + len);
+            if (validWords.has(candidate)) {
+              matchedEnd = pos + len;
+              break;
+            }
+          }
+        }
+        const subText = text.slice(pos, matchedEnd);
+        const loc = findLocation(pos);
+        refined.push({
+          id: `t_${pos}_${matchedEnd}`,
+          text: subText,
+          start: pos,
+          end: matchedEnd,
+          isWord: CJK_REGEX.test(subText),
+          sentenceIdx: loc.sentenceIdx,
+          paragraphIdx: loc.paragraphIdx,
+        });
+        pos = matchedEnd;
+      }
+    }
+
+    return refined;
+  }
 }
 
 export const defaultSegmenter = new IntlChineseSegmenter();
 
-export function segmentText(text: string, merges?: { start: number; end: number }[]): Token[] {
-  return defaultSegmenter.segment(text, merges);
+export function segmentText(
+  text: string,
+  merges?: { start: number; end: number }[],
+  validWords?: ReadonlySet<string>
+): Token[] {
+  return defaultSegmenter.segment(text, merges, validWords);
+}
+
+/**
+ * Segments Chinese text and validates multi-character tokens against CC-CEDICT
+ * so non-dictionary chunks (like "不相" in "不相见") are re-aligned to valid dictionary words ("不" + "相见").
+ */
+export async function segmentTextWithDictionary(
+  text: string,
+  merges: { start: number; end: number }[] = []
+): Promise<Token[]> {
+  if (!text) return [];
+
+  // Collect candidate 2..4 char CJK substrings in text
+  const candidates: string[] = [];
+  for (let i = 0; i < text.length; i++) {
+    if (!CJK_REGEX.test(text[i])) continue;
+    for (const len of [2, 3, 4]) {
+      if (i + len <= text.length) {
+        const sub = text.slice(i, i + len);
+        if (CJK_REGEX.test(sub[sub.length - 1])) {
+          candidates.push(sub);
+        }
+      }
+    }
+  }
+
+  const validWords = await filterValidDictionaryWords(candidates);
+  if (validWords.size === 0) {
+    return defaultSegmenter.segment(text, merges);
+  }
+
+  return defaultSegmenter.segment(text, merges, validWords);
 }

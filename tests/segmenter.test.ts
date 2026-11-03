@@ -100,4 +100,20 @@ describe('IntlChineseSegmenter', () => {
       expect(combined?.end).toBe(end);
     }
   });
+
+  it('repairs non-dictionary multi-character chunks using valid dictionary words', () => {
+    const text = '我与父亲不相见已二年余了';
+    const validWords = new Set(['父亲', '相见']);
+    const tokens = segmenter.segment(text, [], validWords);
+    const tokenTexts = tokens.map(t => t.text);
+
+    // "父亲" stays grouped, while "不相" + "见" is repaired to "不" + "相见", and "二年" is split into "二" + "年"
+    expect(tokenTexts).toContain('父亲');
+    expect(tokenTexts).not.toContain('不相');
+    expect(tokenTexts).toContain('不');
+    expect(tokenTexts).toContain('相见');
+    expect(tokenTexts).not.toContain('二年');
+    expect(tokenTexts).toContain('二');
+    expect(tokenTexts).toContain('年');
+  });
 });

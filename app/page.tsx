@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Passage } from '@/lib/db';
 import { normalizeChineseText, validateChineseText, generateDefaultTitle } from '@/lib/segment/normalize';
-import { segmentText } from '@/lib/segment/segmenter';
+import { segmentTextWithDictionary } from '@/lib/segment/segmenter';
 import { SAMPLE_PASSAGE } from '@/lib/sample';
 import { nanoid } from 'nanoid';
 import {
@@ -86,7 +86,7 @@ export default function LibraryPage() {
 
     const normalized = normalizeChineseText(text);
     const finalTitle = title.trim() || generateDefaultTitle(normalized);
-    const tokens = segmentText(normalized);
+    const tokens = await segmentTextWithDictionary(normalized);
     const id = nanoid(10);
     const now = Date.now();
 

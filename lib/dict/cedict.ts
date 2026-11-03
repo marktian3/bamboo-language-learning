@@ -82,6 +82,39 @@ export async function lookupDictionary(word: string): Promise<DictEntry | null> 
 }
 
 /**
+ * Checks which candidate words exist in the dictionary in a single batch query.
+ */
+export async function filterValidDictionaryWords(candidates: string[]): Promise<Set<string>> {
+  if (candidates.length === 0) return new Set();
+  await ensureDictionaryLoaded();
+
+  const unique = Array.from(new Set(candidates));
+  const valid = new Set<string>();
+
+  try {
+    const entries = await db.dict.bulkGet(unique);
+    for (const entry of entries) {
+      if (entry) valid.add(entry.key);
+    }
+    if (valid.size > 0 || !memoryDictFallback) {
+      return valid;
+    }
+  } catch {
+    // IndexedDB unavailable; fall back to memoryDictFallback
+  }
+
+  if (memoryDictFallback) {
+    for (const word of unique) {
+      if (memoryDictFallback.has(word)) {
+        valid.add(word);
+      }
+    }
+  }
+
+  return valid;
+}
+
+/**
  * Builds a dictionary fallback gloss item for a word (§7.5)
  */
 export async function buildDictionaryFallbackGloss(
